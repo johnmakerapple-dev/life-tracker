@@ -70,6 +70,24 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase;
 .sleep .val { margin-left: auto; font-size: 26px; font-weight: 700;
   color: var(--accent); font-variant-numeric: tabular-nums; padding-bottom: 4px; }
 
+/* ---- 1..5 rating + scale rows ---- */
+.scale-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.scale-row .ql { font-size: 14px; color: var(--muted); flex: 1; }
+.rating { display: flex; gap: 6px; }
+.rating button { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; }
+.rating button:active { transform: scale(.92); }
+.rating button.on { color: #06231d; }
+.wb .scale-row:first-child { margin-top: 0; }
+.wb-note { width: 100%; margin-top: 12px; background: var(--panel-2); border: 1px solid var(--line);
+  color: var(--text); border-radius: 10px; padding: 10px 12px; font-size: 15px; }
+
+/* ---- recent notes log ---- */
+.logline { padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 1.4; }
+.logline:last-child { border-bottom: none; }
+.logline .lt { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.logline b { color: var(--accent); font-weight: 600; }
+
 /* ---- tab bar ---- */
 #tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--tabh) + env(safe-area-inset-bottom));

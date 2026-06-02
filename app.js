@@ -4,9 +4,11 @@
    Структура data:
      categories: [{id, name, color, productive}]   // занятия с таймером
      habits:     [{id, name, color}]                // привычки/срывы — мгновенные тапы
+     scales:     [{id, name, color}]                // шкалы самочувствия (оценка 1–5)
      sessions:   [{id, catId, start, end}]          // отрезки времени (мс)
-     events:     [{id, habitId, ts}]                // мгновенные события
-     sleep:      { "YYYY-MM-DD": hours }            // сон за прошлую ночь к утру этой даты
+     events:     [{id, habitId, ts, note?}]         // мгновенные события (+ пояснение)
+     wellbeing:  [{id, ts, scores:{scaleId:1..5}, note?}]  // чек-ины самочувствия
+     sleep:      { "YYYY-MM-DD": {bed,wake,quality?} | hours }  // сон к утру этой даты
    ============================================================ */
 
 const STORE_KEY = "tracker_v1";
@@ -23,8 +25,14 @@ const DEFAULTS = {
     { id: "urge",  name: "Импульс/срыв", color: "#ff6b6b" },
     { id: "thoughts", name: "Плохие мысли", color: "#ff8fab" },
   ],
+  scales: [
+    { id: "mood",   name: "Настроение", color: "#3dd6b0" },
+    { id: "energy", name: "Энергия",    color: "#5b9cff" },
+    { id: "stress", name: "Стресс",     color: "#ff9f43" },
+  ],
   sessions: [],
   events: [],
+  wellbeing: [],
   sleep: {},
 };
 
@@ -76,21 +84,23 @@ function fmtHM(sec) {
 function runningSession() { return data.sessions.find(s => s.end == null) || null; }
 function cat(id) { return data.categories.find(c => c.id === id); }
 function habit(id) { return data.habits.find(h => h.id === id); }
+function scale(id) { return data.scales.find(s => s.id === id); }
 
 let toastTimer = null;
-function toast(msg, undoFn) {
+// actions: optional array of { label, fn }
+function toast(msg, actions = []) {
   const t = $("#toast");
   t.innerHTML = "";
   t.append(document.createTextNode(msg));
-  if (undoFn) {
+  for (const a of actions) {
     const b = document.createElement("button");
-    b.textContent = "Отменить";
-    b.onclick = () => { undoFn(); t.hidden = true; clearTimeout(toastTimer); };
+    b.textContent = a.label;
+    b.onclick = () => { t.hidden = true; clearTimeout(toastTimer); a.fn(); };
     t.append(b);
   }
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 4000);
+  toastTimer = setTimeout(() => (t.hidden = true), 5000);
 }
 
 // ---------- actions ----------
@@ -110,9 +120,29 @@ function logEvent(habitId) {
   const ev = { id: uid(), habitId, ts: Date.now() };
   data.events.push(ev); save();
   const h = habit(habitId);
-  toast(`Отмечено: ${h ? h.name : "событие"}`, () => {
-    data.events = data.events.filter(e => e.id !== ev.id); save(); render();
-  });
+  toast(`Отмечено: ${h ? h.name : "событие"}`, [
+    { label: "Заметка", fn: () => {
+        const note = prompt("Что именно за импульс/срыв? (необязательно)", ev.note || "");
+        if (note != null) { ev.note = note.trim(); if (!ev.note) delete ev.note; save(); }
+    } },
+    { label: "Отменить", fn: () => {
+        data.events = data.events.filter(e => e.id !== ev.id); save(); render();
+    } },
+  ]);
+  render();
+}
+
+// log a wellbeing check-in: scores {scaleId:1..5}, optional note
+function logWellbeing(scores, note) {
+  if (!scores || !Object.keys(scores).length) { toast("Поставь хотя бы одну оценку"); return; }
+  const entry = { id: uid(), ts: Date.now(), scores };
+  if (note && note.trim()) entry.note = note.trim();
+  data.wellbeing.push(entry); save();
+  toast("Самочувствие записано", [
+    { label: "Отменить", fn: () => {
+        data.wellbeing = data.wellbeing.filter(e => e.id !== entry.id); save(); render();
+    } },
+  ]);
   render();
 }
 
@@ -121,7 +151,7 @@ function logEvent(habitId) {
 function setSleepField(key, field, val) {
   const cur = (typeof data.sleep[key] === "object" && data.sleep[key]) ? data.sleep[key] : {};
   if (val) cur[field] = val; else delete cur[field];
-  if (!cur.bed && !cur.wake) delete data.sleep[key];
+  if (!cur.bed && !cur.wake && !cur.quality) delete data.sleep[key];
   else data.sleep[key] = cur;
   save(); render();
 }
@@ -143,6 +173,17 @@ function fmtHours(h) {
   if (!h) return "—";
   const H = Math.floor(h), M = Math.round((h - H) * 60);
   return M ? `${H}ч ${M}м` : `${H}ч`;
+}
+
+// 1..5 rating control. attr e.g. `data-wb="mood"`; current 0 = none selected.
+function ratingHtml(attr, current, color) {
+  let s = `<div class="rating" ${attr}>`;
+  for (let i = 1; i <= 5; i++) {
+    const on = current === i;
+    s += `<button data-val="${i}" class="${on ? "on" : ""}"` +
+         (on ? ` style="background:${color};border-color:${color}"` : "") + `>${i}</button>`;
+  }
+  return s + `</div>`;
 }
 
 // ---------- per-day aggregation (splits sessions over midnight) ----------
@@ -218,11 +259,16 @@ function renderHome() {
   const sv = data.sleep[sk];
   const bed = (sv && typeof sv === "object" && sv.bed) || "";
   const wake = (sv && typeof sv === "object" && sv.wake) || "";
+  const sq = (sv && typeof sv === "object" && sv.quality) || 0;
   html += `<h2>Сон прошлой ночью</h2>
     <div class="sleep">
       <label>Лёг<input type="time" data-sleep="bed" value="${bed}"></label>
       <label>Проснулся<input type="time" data-sleep="wake" value="${wake}"></label>
       <div class="val">${fmtHours(sleepHours(sv))}</div>
+    </div>
+    <div class="scale-row">
+      <span class="ql">Качество сна</span>
+      ${ratingHtml("data-sleepq", sq, "#3dd6b0")}
     </div>`;
 
   // activities
@@ -255,6 +301,21 @@ function renderHome() {
     html += `</div>`;
   }
 
+  // wellbeing check-in
+  if (data.scales.length) {
+    html += `<h2>Самочувствие</h2><div class="card wb">`;
+    for (const sc of data.scales) {
+      html += `<div class="scale-row">
+        <span class="ql">${esc(sc.name)}</span>
+        ${ratingHtml(`data-wb="${sc.id}"`, 0, sc.color)}
+      </div>`;
+    }
+    html += `<input type="text" id="wbNote" class="wb-note" placeholder="заметка (необязательно)">
+      <button class="btn" id="wbSave" style="width:100%;margin-top:10px">Записать самочувствие</button>`;
+    const wbToday = data.wellbeing.filter(e => dateKey(e.ts) === todayKey()).length;
+    html += `<div class="note" style="margin-top:10px">${wbToday ? "Сегодня отметок: " + wbToday : "Сегодня ещё не отмечал"}</div></div>`;
+  }
+
   app.innerHTML = html;
 
   // wire
@@ -264,6 +325,35 @@ function renderHome() {
     b.onclick = () => logEvent(b.dataset.habit);
   for (const inp of app.querySelectorAll("[data-sleep]"))
     inp.onchange = () => setSleepField(sk, inp.dataset.sleep, inp.value);
+
+  // sleep quality rating
+  for (const b of app.querySelectorAll("[data-sleepq] button"))
+    b.onclick = () => {
+      const v = Number(b.dataset.val);
+      setSleepField(sk, "quality", sq === v ? null : v);
+    };
+
+  // wellbeing rating buttons (toggle within group; DOM-only until "Записать")
+  for (const grp of app.querySelectorAll("[data-wb]")) {
+    const col = (scale(grp.dataset.wb) || {}).color || "#3dd6b0";
+    for (const b of grp.querySelectorAll("button"))
+      b.onclick = () => {
+        const wasOn = b.classList.contains("on");
+        for (const x of grp.querySelectorAll("button")) {
+          x.classList.remove("on"); x.style.background = ""; x.style.borderColor = "";
+        }
+        if (!wasOn) { b.classList.add("on"); b.style.background = col; b.style.borderColor = col; }
+      };
+  }
+  const wbSave = $("#wbSave");
+  if (wbSave) wbSave.onclick = () => {
+    const scores = {};
+    for (const grp of app.querySelectorAll("[data-wb]")) {
+      const on = grp.querySelector("button.on");
+      if (on) scores[grp.dataset.wb] = Number(on.dataset.val);
+    }
+    logWellbeing(scores, $("#wbNote").value);
+  };
 
   // live timer
   if (run) {
@@ -320,6 +410,50 @@ function renderStats() {
   // scatter sleep vs productivity
   html += `<h2>Сон → продуктивность</h2><div class="card"><canvas id="cScatter" height="220"></canvas>
     <div class="note" id="scatterNote"></div></div>`;
+
+  // wellbeing averages (last DAYS days)
+  html += `<h2>Самочувствие — среднее за ${DAYS}д</h2><div class="card">`;
+  let anyWb = false;
+  for (const sc of data.scales) {
+    let sum = 0, cnt = 0;
+    for (const e of data.wellbeing)
+      if (e.ts >= from && e.scores && e.scores[sc.id] != null) { sum += e.scores[sc.id]; cnt++; }
+    if (!cnt) continue; anyWb = true;
+    const avg = sum / cnt;
+    html += `<div class="bar-row"><span class="nm">${esc(sc.name)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${(avg / 5 * 100).toFixed(0)}%;background:${sc.color}"></span></span>
+      <span class="vl">${avg.toFixed(1)}/5</span></div>`;
+  }
+  // sleep quality average
+  const fromKey = dateKey(from);
+  let qSum = 0, qCnt = 0;
+  for (const [k, v] of Object.entries(data.sleep))
+    if (k >= fromKey && typeof v === "object" && v.quality) { qSum += v.quality; qCnt++; }
+  if (qCnt) {
+    anyWb = true;
+    const avg = qSum / qCnt;
+    html += `<div class="bar-row"><span class="nm">Качество сна</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${(avg / 5 * 100).toFixed(0)}%;background:#06d6a0"></span></span>
+      <span class="vl">${avg.toFixed(1)}/5</span></div>`;
+  }
+  if (!anyWb) html += `<div class="note">Пока нет оценок самочувствия. Отмечай на вкладке «Сегодня».</div>`;
+  html += `</div>`;
+
+  // recent notes (slips + wellbeing) with explanations
+  const notes = [];
+  for (const e of data.events) if (e.note) notes.push({ ts: e.ts, who: (habit(e.habitId) || {}).name || "событие", text: e.note });
+  for (const e of data.wellbeing) if (e.note) notes.push({ ts: e.ts, who: "самочувствие", text: e.note });
+  notes.sort((a, b) => b.ts - a.ts);
+  if (notes.length) {
+    html += `<h2>Последние заметки</h2><div class="card">`;
+    for (const n of notes.slice(0, 10)) {
+      const d = new Date(n.ts);
+      const when = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")} ` +
+                   `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      html += `<div class="logline"><span class="lt">${when}</span> <b>${esc(n.who)}</b> — ${esc(n.text)}</div>`;
+    }
+    html += `</div>`;
+  }
 
   app.innerHTML = html;
 
@@ -443,6 +577,16 @@ function renderSettings() {
   }
   html += `<div class="add-form"><input id="newHabit" placeholder="Новая привычка…"><button class="btn" id="addHabit">+</button></div></div>`;
 
+  html += `<h2>Шкалы самочувствия (оценка 1–5)</h2><div class="card" id="scaleList">`;
+  for (const sc of data.scales) {
+    html += `<div class="row" data-id="${sc.id}">
+      <span class="dot" style="background:${sc.color}"></span>
+      <input type="text" value="${esc(sc.name)}" data-edit="sc-name">
+      <button class="x" data-edit="sc-del">✕</button>
+    </div>`;
+  }
+  html += `<div class="add-form"><input id="newScale" placeholder="Новая шкала…"><button class="btn" id="addScale">+</button></div></div>`;
+
   html += `<h2>Данные</h2><div class="card">
     <div class="note">Всё хранится только на этом устройстве. Делай бэкап регулярно.</div>
     <div class="btn-row">
@@ -487,6 +631,21 @@ function wireSettings() {
   $("#addHabit").onclick = () => {
     const v = $("#newHabit").value.trim(); if (!v) return;
     data.habits.push({ id: uid(), name: v, color: PALETTE[(data.habits.length + 4) % PALETTE.length] });
+    save(); renderSettings();
+  };
+  // scales
+  for (const row of app.querySelectorAll("#scaleList .row")) {
+    const id = row.dataset.id, sc = scale(id);
+    row.querySelector('[data-edit="sc-name"]').onchange = e => { sc.name = e.target.value.trim() || sc.name; save(); };
+    row.querySelector('[data-edit="sc-del"]').onclick = () => {
+      if (confirm(`Удалить шкалу «${sc.name}»? Прошлые оценки останутся в истории.`)) {
+        data.scales = data.scales.filter(x => x.id !== id); save(); renderSettings();
+      }
+    };
+  }
+  $("#addScale").onclick = () => {
+    const v = $("#newScale").value.trim(); if (!v) return;
+    data.scales.push({ id: uid(), name: v, color: PALETTE[(data.scales.length + 2) % PALETTE.length] });
     save(); renderSettings();
   };
   // data
