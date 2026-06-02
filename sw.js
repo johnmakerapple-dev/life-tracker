@@ -1,6 +1,6 @@
 /* Service worker: кеширует оболочку приложения, чтобы оно работало оффлайн.
    Версию бампай при изменении файлов, чтобы кеш обновился. */
-const CACHE = "tracker-v1";
+const CACHE = "tracker-v2";
 const ASSETS = [
   "./",
   "./index.html",

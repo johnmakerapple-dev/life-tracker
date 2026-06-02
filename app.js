@@ -116,11 +116,33 @@ function logEvent(habitId) {
   render();
 }
 
-function setSleep(key, hours) {
-  hours = Math.round(hours * 2) / 2;       // half-hour steps
-  if (hours <= 0) delete data.sleep[key];
-  else data.sleep[key] = Math.min(16, hours);
+// sleep is stored per morning-date as { bed: "HH:MM", wake: "HH:MM" }.
+// Legacy entries may be a plain number (hours) — still supported on read.
+function setSleepField(key, field, val) {
+  const cur = (typeof data.sleep[key] === "object" && data.sleep[key]) ? data.sleep[key] : {};
+  if (val) cur[field] = val; else delete cur[field];
+  if (!cur.bed && !cur.wake) delete data.sleep[key];
+  else data.sleep[key] = cur;
   save(); render();
+}
+
+// hours of sleep from either the new {bed,wake} object or a legacy number
+function sleepHours(v) {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;                  // legacy
+  if (v.bed && v.wake) {
+    const [bh, bm] = v.bed.split(":").map(Number);
+    const [wh, wm] = v.wake.split(":").map(Number);
+    let mins = (wh * 60 + wm) - (bh * 60 + bm);
+    if (mins <= 0) mins += 1440;                         // woke up after midnight
+    return mins / 60;
+  }
+  return 0;
+}
+function fmtHours(h) {
+  if (!h) return "—";
+  const H = Math.floor(h), M = Math.round((h - H) * 60);
+  return M ? `${H}ч ${M}м` : `${H}ч`;
 }
 
 // ---------- per-day aggregation (splits sessions over midnight) ----------
@@ -191,15 +213,16 @@ function renderHome() {
     </div>`;
   }
 
-  // sleep
+  // sleep — bedtime & wake time; duration computed
   const sk = todayKey();
-  const sh = data.sleep[sk];
+  const sv = data.sleep[sk];
+  const bed = (sv && typeof sv === "object" && sv.bed) || "";
+  const wake = (sv && typeof sv === "object" && sv.wake) || "";
   html += `<h2>Сон прошлой ночью</h2>
     <div class="sleep">
-      <button class="step" data-sleep="-1">−</button>
-      <div class="val">${sh != null ? sh : "—"}<small> ч</small></div>
-      <button class="step" data-sleep="1">+</button>
-      <div class="hint">влияет на график продуктивности</div>
+      <label>Лёг<input type="time" data-sleep="bed" value="${bed}"></label>
+      <label>Проснулся<input type="time" data-sleep="wake" value="${wake}"></label>
+      <div class="val">${fmtHours(sleepHours(sv))}</div>
     </div>`;
 
   // activities
@@ -239,8 +262,8 @@ function renderHome() {
     b.onclick = () => toggleActivity(b.dataset.cat);
   for (const b of app.querySelectorAll("[data-habit]"))
     b.onclick = () => logEvent(b.dataset.habit);
-  for (const b of app.querySelectorAll("[data-sleep]"))
-    b.onclick = () => setSleep(sk, (data.sleep[sk] || 0) + Number(b.dataset.sleep) * 0.5);
+  for (const inp of app.querySelectorAll("[data-sleep]"))
+    inp.onchange = () => setSleepField(sk, inp.dataset.sleep, inp.value);
 
   // live timer
   if (run) {
@@ -343,7 +366,8 @@ function drawScatter(daily) {
 
   // collect points: x sleep hours, y productive hours, where both exist
   const pts = [];
-  for (const [key, hours] of Object.entries(data.sleep)) {
+  for (const [key, val] of Object.entries(data.sleep)) {
+    const hours = sleepHours(val);
     const prod = productiveSecondsForDay(daily[key]) / 3600;
     if (hours > 0) pts.push({ x: hours, y: prod });
   }

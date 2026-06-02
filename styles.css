@@ -57,16 +57,18 @@ h2 { font-size: 15px; color: var(--muted); text-transform: uppercase;
 /* habit tiles smaller */
 .grid.habits .tile { min-height: 60px; font-size: 15px; }
 
-/* ---- sleep stepper ---- */
-.sleep { display: flex; align-items: center; gap: 14px;
+/* ---- sleep: bedtime / wake time ---- */
+.sleep { display: flex; align-items: flex-end; gap: 12px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
-.sleep .val { font-size: 28px; font-weight: 700; min-width: 92px; text-align: center;
-  font-variant-numeric: tabular-nums; }
-.sleep .val small { font-size: 14px; color: var(--muted); font-weight: 500; }
-.step { width: 48px; height: 48px; border-radius: 12px; border: 1px solid var(--line);
-  background: var(--panel-2); color: var(--text); font-size: 24px; cursor: pointer; }
-.step:active { background: var(--accent-dim); }
-.sleep .hint { font-size: 12px; color: var(--muted); margin-left: auto; max-width: 110px; }
+.sleep label { display: flex; flex-direction: column; gap: 5px;
+  font-size: 12px; color: var(--muted); font-weight: 600; }
+.sleep input[type=time] {
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 10px; padding: 9px 12px; font-size: 18px; font-weight: 600;
+  font-variant-numeric: tabular-nums; min-width: 110px; -webkit-appearance: none;
+}
+.sleep .val { margin-left: auto; font-size: 26px; font-weight: 700;
+  color: var(--accent); font-variant-numeric: tabular-nums; padding-bottom: 4px; }
 
 /* ---- tab bar ---- */
 #tabbar {
